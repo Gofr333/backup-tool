@@ -1,11 +1,11 @@
 from pathlib import Path
 import os
 import shutil
+import sys
 from datetime import datetime
 
 
 VERSION = "1.0.0"
-
 SAFETY_MARGIN_BYTES = 5 * 1024**3
 
 COMMON_EXCLUDED_FOLDERS = {
@@ -107,7 +107,6 @@ def scan_folder(folder, excluded_folders):
             except OSError as error:
                 errors.append(f"{dir_path}: {error}")
 
-        # Tell os.walk which folders it is allowed to enter
         dir_names[:] = allowed_dirs
 
         for file_name in file_names:
@@ -137,24 +136,14 @@ def scan_folder(folder, excluded_folders):
 
 
 def build_backup_folder(source_folder, backup_location):
-    timestamp = datetime.now().strftime(
-        "%Y-%m-%d_%H-%M-%S"
-    )
-
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     source_name = source_folder.name or "Root"
-
     base_name = f"{source_name}_{timestamp}"
-
     backup_folder = backup_location / base_name
-
     counter = 1
 
     while backup_folder.exists():
-        backup_folder = (
-            backup_location
-            / f"{base_name}_{counter}"
-        )
-
+        backup_folder = backup_location / f"{base_name}_{counter}"
         counter += 1
 
     return backup_folder
@@ -171,10 +160,7 @@ def create_backup(
     errors = []
     stopped_for_space = False
 
-    backup_folder.mkdir(
-        parents=True,
-        exist_ok=False,
-    )
+    backup_folder.mkdir(parents=True, exist_ok=False)
 
     def handle_walk_error(error):
         errors.append(str(error))
@@ -205,38 +191,22 @@ def create_backup(
 
         dir_names[:] = allowed_dirs
 
-        relative_folder = current_folder.relative_to(
-            source_folder
-        )
-
-        destination_folder = (
-            backup_folder / relative_folder
-        )
+        relative_folder = current_folder.relative_to(source_folder)
+        destination_folder = backup_folder / relative_folder
 
         try:
-            destination_folder.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
+            destination_folder.mkdir(parents=True, exist_ok=True)
 
         except OSError as error:
             errors.append(
-                f"Could not create folder "
-                f"{destination_folder}: {error}"
+                f"Could not create folder {destination_folder}: {error}"
             )
-
-            # Do not enter subfolders if this folder
-            # cannot be created.
             dir_names[:] = []
-
             continue
 
         for file_name in file_names:
             source_file = current_folder / file_name
-
-            destination_file = (
-                destination_folder / file_name
-            )
+            destination_file = destination_folder / file_name
 
             try:
                 if is_link_like(source_file):
@@ -246,21 +216,12 @@ def create_backup(
                     continue
 
                 file_size = source_file.stat().st_size
+                _, _, free_space = shutil.disk_usage(backup_location)
 
-                # Check disk space again during the backup.
-                _, _, free_space = shutil.disk_usage(
-                    backup_location
-                )
-
-                if (
-                    free_space - file_size
-                    < SAFETY_MARGIN_BYTES
-                ):
+                if free_space - file_size < SAFETY_MARGIN_BYTES:
                     errors.append(
-                        "Backup stopped because the disk "
-                        "reached the safety margin."
+                        "Backup stopped because the disk reached the safety margin."
                     )
-
                     stopped_for_space = True
 
                     return (
@@ -270,63 +231,36 @@ def create_backup(
                         stopped_for_space,
                     )
 
-                shutil.copy2(
-                    source_file,
-                    destination_file,
-                )
+                shutil.copy2(source_file, destination_file)
 
                 copied_files += 1
                 copied_bytes += file_size
 
-                relative_file = source_file.relative_to(
-                    source_folder
-                )
-
-                print(
-                    f"[COPIED] {relative_file}"
-                )
+                relative_file = source_file.relative_to(source_folder)
+                print(f"[COPIED] {relative_file}")
 
             except OSError as error:
-                relative_file = source_file.relative_to(
-                    source_folder
-                )
+                relative_file = source_file.relative_to(source_folder)
+                errors.append(f"{relative_file}: {error}")
+                print(f"[ERROR] {relative_file}: {error}")
 
-                errors.append(
-                    f"{relative_file}: {error}"
-                )
-
-                print(
-                    f"[ERROR] "
-                    f"{relative_file}: {error}"
-                )
-
-    return (
-        copied_files,
-        copied_bytes,
-        errors,
-        stopped_for_space,
-    )
+    return copied_files, copied_bytes, errors, stopped_for_space
 
 
 def mark_incomplete(backup_folder):
     incomplete_folder = backup_folder.with_name(
         f"{backup_folder.name}_INCOMPLETE"
     )
-
     counter = 1
 
     while incomplete_folder.exists():
         incomplete_folder = backup_folder.with_name(
             f"{backup_folder.name}_INCOMPLETE_{counter}"
         )
-
         counter += 1
 
     try:
-        backup_folder.rename(
-            incomplete_folder
-        )
-
+        backup_folder.rename(incomplete_folder)
         return incomplete_folder
 
     except OSError:
@@ -337,29 +271,32 @@ def write_error_log(backup_folder, errors):
     if not errors:
         return None
 
-    log_path = (
-        backup_folder / "backup_errors.log"
-    )
+    log_path = backup_folder / "backup_errors.log"
 
     try:
-        with log_path.open(
-            "w",
-            encoding="utf-8",
-        ) as log_file:
-
+        with log_path.open("w", encoding="utf-8") as log_file:
             log_file.write("BACKUP ERRORS\n")
             log_file.write("=" * 60)
             log_file.write("\n\n")
 
             for error in errors:
-                log_file.write(
-                    f"- {error}\n"
-                )
+                log_file.write(f"- {error}\n")
 
         return log_path
 
     except OSError:
         return None
+
+
+def pause_before_exit():
+    if getattr(sys, "frozen", False):
+        print()
+
+        try:
+            input("Press Enter to close...")
+
+        except (EOFError, KeyboardInterrupt):
+            pass
 
 
 def main():
@@ -369,54 +306,31 @@ def main():
     print("=" * 60)
     print()
 
-    source_folder = read_path(
-        "Source folder: "
-    )
-
-    backup_location = read_path(
-        "Backup location: "
-    )
+    source_folder = read_path("Source folder: ")
+    backup_location = read_path("Backup location: ")
 
     if not source_folder.is_dir():
         print()
-        print(
-            "ERROR: Source folder does not exist."
-        )
+        print("ERROR: Source folder does not exist.")
         return
 
-    if (
-        backup_location.exists()
-        and not backup_location.is_dir()
-    ):
+    if backup_location.exists() and not backup_location.is_dir():
         print()
-        print(
-            "ERROR: Backup location exists "
-            "but is not a folder."
-        )
+        print("ERROR: Backup location exists but is not a folder.")
         return
 
     source_folder = source_folder.resolve()
     backup_location = backup_location.resolve()
 
-    if backup_location.is_relative_to(
-        source_folder
-    ):
+    if backup_location.is_relative_to(source_folder):
         print()
-        print(
-            "ERROR: Backup location cannot be "
-            "inside the source folder."
-        )
+        print("ERROR: Backup location cannot be inside the source folder.")
         return
 
-    excluded_folders = (
-        choose_excluded_folders()
-    )
+    excluded_folders = choose_excluded_folders()
 
     try:
-        backup_location.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        backup_location.mkdir(parents=True, exist_ok=True)
 
         (
             file_count,
@@ -424,172 +338,77 @@ def main():
             skipped_folders,
             skipped_links,
             scan_errors,
-        ) = scan_folder(
-            source_folder,
-            excluded_folders,
-        )
+        ) = scan_folder(source_folder, excluded_folders)
 
-        # If the scan is unreliable,
-        # do not start the backup.
         if scan_errors:
             print()
             print("=" * 60)
             print("SCAN FAILED")
             print("=" * 60)
-
             print()
-            print(
-                "The source folder could not "
-                "be scanned reliably."
-            )
+            print("The source folder could not be scanned reliably.")
             print()
 
             for error in scan_errors[:10]:
-                print(
-                    f"[ERROR] {error}"
-                )
+                print(f"[ERROR] {error}")
 
             if len(scan_errors) > 10:
-                remaining_errors = (
-                    len(scan_errors) - 10
-                )
-
-                print(
-                    f"... and {remaining_errors} "
-                    "more error(s)."
-                )
+                remaining_errors = len(scan_errors) - 10
+                print(f"... and {remaining_errors} more error(s).")
 
             print()
             print(
-                "No backup was started because "
-                "the preview may be incomplete."
+                "No backup was started because the preview may be incomplete."
             )
-
             return
 
-        backup_folder = build_backup_folder(
-            source_folder,
-            backup_location,
-        )
-
-        disk_total, _, free_space = (
-            shutil.disk_usage(
-                backup_location
-            )
-        )
-
-        required_space = (
-            total_size
-            + SAFETY_MARGIN_BYTES
-        )
+        backup_folder = build_backup_folder(source_folder, backup_location)
+        disk_total, _, free_space = shutil.disk_usage(backup_location)
+        required_space = total_size + SAFETY_MARGIN_BYTES
 
         print()
         print("=" * 60)
         print("BACKUP PREVIEW")
         print("=" * 60)
-
-        print(
-            f"Source:          "
-            f"{source_folder}"
-        )
-
-        print(
-            f"Destination:     "
-            f"{backup_folder}"
-        )
-
-        print(
-            f"Files found:     "
-            f"{file_count}"
-        )
-
-        print(
-            f"Backup size:     "
-            f"{format_size(total_size)}"
-        )
-
-        print(
-            f"Disk size:       "
-            f"{format_size(disk_total)}"
-        )
-
-        print(
-            f"Free space:      "
-            f"{format_size(free_space)}"
-        )
-
-        print(
-            f"Safety margin:   "
-            f"{format_size(SAFETY_MARGIN_BYTES)}"
-        )
-
-        print(
-            f"Folders skipped: "
-            f"{skipped_folders}"
-        )
-
-        print(
-            f"Links skipped:   "
-            f"{skipped_links}"
-        )
+        print(f"Source:          {source_folder}")
+        print(f"Destination:     {backup_folder}")
+        print(f"Files found:     {file_count}")
+        print(f"Backup size:     {format_size(total_size)}")
+        print(f"Disk size:       {format_size(disk_total)}")
+        print(f"Free space:      {format_size(free_space)}")
+        print(f"Safety margin:   {format_size(SAFETY_MARGIN_BYTES)}")
+        print(f"Folders skipped: {skipped_folders}")
+        print(f"Links skipped:   {skipped_links}")
 
         if excluded_folders:
-            print(
-                "Excluded:         "
-                + ", ".join(
-                    sorted(
-                        excluded_folders
-                    )
-                )
-            )
+            print("Excluded:         " + ", ".join(sorted(excluded_folders)))
 
         print()
 
         if required_space > free_space:
-            missing_space = (
-                required_space
-                - free_space
-            )
-
+            missing_space = required_space - free_space
+            print("ERROR: Not enough free space for this backup.")
             print(
-                "ERROR: Not enough free space "
-                "for this backup."
+                f"Additional space required: {format_size(missing_space)}"
             )
-
-            print(
-                f"Additional space required: "
-                f"{format_size(missing_space)}"
-            )
-
             return
 
-        remaining_space = (
-            free_space
-            - total_size
-        )
-
+        remaining_space = free_space - total_size
         print(
             "Estimated free space after backup: "
             f"{format_size(remaining_space)}"
         )
-
         print()
 
-        expected_confirmation = (
-            f"BACKUP {file_count}"
-        )
-
+        expected_confirmation = f"BACKUP {file_count}"
         confirmation = input(
-            f'Type "{expected_confirmation}" '
-            "to continue: "
+            f'Type "{expected_confirmation}" to continue: '
         ).strip().upper()
 
         if confirmation != expected_confirmation:
             print()
             print("Backup cancelled.")
-            print(
-                "No backup folder was created."
-            )
+            print("No backup folder was created.")
             return
 
         print()
@@ -614,82 +433,37 @@ def main():
         except KeyboardInterrupt:
             print()
             print()
-            print(
-                "Backup interrupted by the user."
-            )
+            print("Backup interrupted by the user.")
 
             if backup_folder.exists():
-                backup_folder = (
-                    mark_incomplete(
-                        backup_folder
-                    )
-                )
-
-                print(
-                    "Partial backup kept at:"
-                )
-
-                print(
-                    backup_folder
-                )
+                backup_folder = mark_incomplete(backup_folder)
+                print("Partial backup kept at:")
+                print(backup_folder)
 
             return
 
-        # Detect files added/deleted
-        # between preview and copying.
         if copied_files != file_count:
             copy_errors.append(
-                "The number of copied files does "
-                "not match the preview. The source "
-                "folder may have changed during "
-                "the backup."
+                "The number of copied files does not match the preview. "
+                "The source folder may have changed during the backup."
             )
 
         if copy_errors or stopped_for_space:
-            backup_folder = mark_incomplete(
-                backup_folder
-            )
-
-            error_log = write_error_log(
-                backup_folder,
-                copy_errors,
-            )
+            backup_folder = mark_incomplete(backup_folder)
+            error_log = write_error_log(backup_folder, copy_errors)
 
             print()
             print("=" * 60)
             print("BACKUP INCOMPLETE")
             print("=" * 60)
-
-            print(
-                f"Files planned: "
-                f"{file_count}"
-            )
-
-            print(
-                f"Files copied:  "
-                f"{copied_files}"
-            )
-
-            print(
-                f"Data copied:   "
-                f"{format_size(copied_bytes)}"
-            )
-
-            print(
-                f"Errors:        "
-                f"{len(copy_errors)}"
-            )
-
-            print(
-                f"Location:      "
-                f"{backup_folder}"
-            )
+            print(f"Files planned: {file_count}")
+            print(f"Files copied:  {copied_files}")
+            print(f"Data copied:   {format_size(copied_bytes)}")
+            print(f"Errors:        {len(copy_errors)}")
+            print(f"Location:      {backup_folder}")
 
             if error_log is not None:
-                print(
-                    f"Error log:     "
-                    f"{error_log}"
-                )
+                print(f"Error log:     {error_log}")
 
             return
 
@@ -697,28 +471,13 @@ def main():
         print("=" * 60)
         print("BACKUP COMPLETED")
         print("=" * 60)
-
-        print(
-            f"Files copied: "
-            f"{copied_files}"
-        )
-
-        print(
-            f"Backup size:  "
-            f"{format_size(copied_bytes)}"
-        )
-
-        print(
-            f"Location:     "
-            f"{backup_folder}"
-        )
+        print(f"Files copied: {copied_files}")
+        print(f"Backup size:  {format_size(copied_bytes)}")
+        print(f"Location:     {backup_folder}")
 
     except OSError as error:
         print()
-        print(
-            f"ERROR: Backup failed: "
-            f"{error}"
-        )
+        print(f"ERROR: Backup failed: {error}")
 
 
 if __name__ == "__main__":
@@ -728,3 +487,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print()
         print("Operation cancelled by user.")
+
+    finally:
+        pause_before_exit()
