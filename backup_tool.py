@@ -3,6 +3,9 @@ import shutil
 from datetime import datetime
 
 
+SAFETY_MARGIN = 5 * 1024 * 1024 * 1024
+
+
 def format_size(size):
     if size < 1024:
         return f"{size} bytes"
@@ -77,13 +80,46 @@ def main():
             source_folder
         )
 
-        print()
-        print(f"Backup folder: {backup_folder}")
-        print(f"Files found: {file_count}")
-        print(
-            f"Total size: "
-            f"{format_size(total_size)}"
+        _, _, free_space = shutil.disk_usage(
+            backup_location
         )
+
+        required_space = total_size + SAFETY_MARGIN
+
+        print()
+        print("=" * 50)
+        print("BACKUP PREVIEW")
+        print("=" * 50)
+        print(f"Source:        {source_folder}")
+        print(f"Destination:   {backup_folder}")
+        print(f"Files found:   {file_count}")
+        print(f"Backup size:   {format_size(total_size)}")
+        print(f"Free space:    {format_size(free_space)}")
+        print(f"Safety margin: {format_size(SAFETY_MARGIN)}")
+        print()
+
+        if required_space > free_space:
+            missing_space = required_space - free_space
+
+            print(
+                "ERROR: Not enough free space "
+                "for this backup"
+            )
+
+            print(
+                f"Additional space required: "
+                f"{format_size(missing_space)}"
+            )
+
+            return
+
+        remaining_space = free_space - total_size
+
+        print(
+            f"Estimated free space after backup: "
+            f"{format_size(remaining_space)}"
+        )
+
         print()
 
         confirmation = input(
@@ -91,13 +127,21 @@ def main():
         ).strip().upper()
 
         if confirmation == "BACKUP":
+            print()
+            print("Creating backup...")
+
             create_backup(
                 source_folder,
                 backup_folder
             )
 
             print()
-            print("Backup completed successfully")
+            print("=" * 50)
+            print("BACKUP COMPLETED")
+            print("=" * 50)
+            print(f"Files copied: {file_count}")
+            print(f"Backup size:  {format_size(total_size)}")
+            print(f"Location:     {backup_folder}")
 
         else:
             print()
