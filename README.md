@@ -132,23 +132,6 @@ On Windows, if `python` is not recognized:
 ```powershell
 py backup_tool.py
 ```
-
-## Verify a Release
-
-Releases also include:
-
-```text
-BackupTool.sha256
-```
-
-On Windows PowerShell you can calculate the executable hash with:
-
-```powershell
-Get-FileHash .\BackupTool.exe -Algorithm SHA256
-```
-
-Compare it with the value in `BackupTool.sha256`.
-
 ## Project Structure
 
 ```text
@@ -160,24 +143,6 @@ backup-tool/
 ├── README.md
 └── .gitignore
 ```
-
-## Creating a Release
-
-After committing and pushing your changes, create and push a version tag:
-
-```powershell
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-GitHub Actions will build:
-
-```text
-BackupTool.exe
-BackupTool.sha256
-```
-
-and attach them to a GitHub Release automatically.
 
 ## Disclaimer
 
